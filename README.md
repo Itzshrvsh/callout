@@ -209,6 +209,20 @@ flutter pub get
 flutter run
 ```
 
+### Building for Windows
+Since the project uses macOS, you cannot build the Windows executable directly. A **GitHub Action** has been set up to build it automatically.
+
+1. Push your changes to GitHub.
+2. Go to the **Actions** tab in your repository.
+3. Select **Build Windows Exe**.
+4. Download the `callout-windows-exe` artifact from the latest run.
+
+If you have a Windows machine:
+```bash
+flutter config --enable-windows-desktop
+flutter build windows
+```
+
 ## Project Structure
 
 ```
