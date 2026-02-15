@@ -16,6 +16,7 @@ class _JoinOrgScreenState extends State<JoinOrgScreen> {
   List<OrganizationModel> _searchResults = [];
   bool _isSearching = false;
   bool _isSubmitting = false;
+  bool _hasSearched = false;
 
   @override
   void dispose() {
@@ -28,7 +29,10 @@ class _JoinOrgScreenState extends State<JoinOrgScreen> {
     final query = _searchController.text.trim();
     if (query.isEmpty) return;
 
-    setState(() => _isSearching = true);
+    setState(() {
+      _isSearching = true;
+      _hasSearched = true;
+    });
 
     try {
       final results = await _orgService.searchOrganizations(query);
@@ -141,7 +145,10 @@ class _JoinOrgScreenState extends State<JoinOrgScreen> {
                   icon: const Icon(Icons.clear),
                   onPressed: () {
                     _searchController.clear();
-                    setState(() => _searchResults = []);
+                    setState(() {
+                      _searchResults = [];
+                      _hasSearched = false;
+                    });
                   },
                 ),
               ),
@@ -158,10 +165,16 @@ class _JoinOrgScreenState extends State<JoinOrgScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.search, size: 64, color: Colors.grey[400]),
+                        Icon(
+                          _hasSearched ? Icons.search_off : Icons.search,
+                          size: 64,
+                          color: Colors.grey[400],
+                        ),
                         const SizedBox(height: 16),
                         Text(
-                          'Search for organizations',
+                          _hasSearched
+                              ? 'No organizations found'
+                              : 'Search for organizations',
                           style: TextStyle(
                             color: Colors.grey[600],
                             fontSize: 16,
