@@ -24,6 +24,11 @@ class _ManageMembersScreenState extends State<ManageMembersScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        setState(() {}); // Rebuild to show/hide FAB
+      }
+    });
     _loadData();
   }
 
@@ -159,6 +164,12 @@ class _ManageMembersScreenState extends State<ManageMembersScreen>
               controller: _tabController,
               children: [_buildMembersList(), _buildJoinRequestsList()],
             ),
+      floatingActionButton: _tabController.index == 0
+          ? FloatingActionButton(
+              onPressed: _showAddMemberDialog,
+              child: const Icon(Icons.person_add),
+            )
+          : null,
     );
   }
 
@@ -195,6 +206,7 @@ class _ManageMembersScreenState extends State<ManageMembersScreen>
                 label: Text(member.getRoleDisplayName()),
                 backgroundColor: _getRoleColor(member.role),
               ),
+              onTap: () => _showEditMemberSheet(member),
             ),
           );
         },
@@ -303,6 +315,253 @@ class _ManageMembersScreenState extends State<ManageMembersScreen>
         return Colors.grey.shade200;
     }
   }
+
+  Future<void> _showAddMemberDialog() async {
+    final emailController = TextEditingController();
+    final departmentController = TextEditingController();
+    MemberRole selectedRole = MemberRole.member;
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Add Member'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: emailController,
+                decoration: const InputDecoration(
+                  labelText: 'User Email',
+                  hintText: 'Enter email address',
+                ),
+                keyboardType: TextInputType.emailAddress,
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<MemberRole>(
+                value: selectedRole,
+                decoration: const InputDecoration(labelText: 'Role'),
+                items: MemberRole.values
+                    .where((r) => r != MemberRole.admin)
+                    .map((role) {
+                      return DropdownMenuItem(
+                        value: role,
+                        child: Text(
+                          _RoleSelectionDialogState.getRoleDisplayName(role),
+                        ),
+                      );
+                    })
+                    .toList(),
+                onChanged: (val) => setState(() => selectedRole = val!),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: departmentController,
+                decoration: const InputDecoration(
+                  labelText: 'Department (Optional)',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final email = emailController.text.trim();
+                if (email.isEmpty) return;
+
+                Navigator.pop(context); // Close dialog
+                _addMember(
+                  email,
+                  selectedRole,
+                  departmentController.text.trim(),
+                );
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _addMember(
+    String email,
+    MemberRole role,
+    String department,
+  ) async {
+    setState(() => _isLoading = true);
+    try {
+      await _orgService.addMemberByEmail(
+        organizationId: widget.organizationId,
+        email: email,
+        role: role,
+        department: department.isEmpty ? null : department,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Member added successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        _loadData();
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _showEditMemberSheet(MemberModel member) async {
+    final departmentController = TextEditingController(text: member.department);
+    MemberRole selectedRole = member.role;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+          left: 16,
+          right: 16,
+          top: 16,
+        ),
+        child: StatefulBuilder(
+          builder: (context, setState) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Edit ${member.fullName ?? member.email}',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<MemberRole>(
+                value: selectedRole,
+                decoration: const InputDecoration(labelText: 'Role'),
+                items: MemberRole.values.map((role) {
+                  return DropdownMenuItem(
+                    value: role,
+                    child: Text(
+                      _RoleSelectionDialogState.getRoleDisplayName(role),
+                    ),
+                  );
+                }).toList(),
+                onChanged: (val) => setState(() => selectedRole = val!),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: departmentController,
+                decoration: const InputDecoration(labelText: 'Department'),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  _updateMember(
+                    member,
+                    selectedRole,
+                    departmentController.text.trim(),
+                  );
+                },
+                child: const Text('Save Changes'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Remove Member'),
+                      content: Text(
+                        'Are you sure you want to remove ${member.fullName}?',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.red,
+                          ),
+                          child: const Text('Remove'),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (confirm == true && mounted) {
+                    Navigator.pop(context);
+                    _removeMember(member);
+                  }
+                },
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Remove Member'),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateMember(
+    MemberModel member,
+    MemberRole role,
+    String department,
+  ) async {
+    setState(() => _isLoading = true);
+    try {
+      await _orgService.updateMemberRole(
+        memberId: member.id,
+        role: role,
+        department: department.isEmpty ? null : department,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Member updated successfully')),
+        );
+        _loadData();
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _removeMember(MemberModel member) async {
+    setState(() => _isLoading = true);
+    try {
+      await _orgService.removeMember(member.id);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Member removed')));
+        _loadData();
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
 }
 
 class _RoleSelectionDialog extends StatefulWidget {
@@ -325,7 +584,7 @@ class _RoleSelectionDialogState extends State<_RoleSelectionDialog> {
             ) // Don't allow selecting admin
             .map((role) {
               return RadioListTile<MemberRole>(
-                title: Text(_getRoleDisplayName(role)),
+                title: Text(getRoleDisplayName(role)),
                 value: role,
                 groupValue: _selectedRole,
                 onChanged: (value) {
@@ -350,7 +609,7 @@ class _RoleSelectionDialogState extends State<_RoleSelectionDialog> {
     );
   }
 
-  String _getRoleDisplayName(MemberRole role) {
+  static String getRoleDisplayName(MemberRole role) {
     switch (role) {
       case MemberRole.admin:
         return 'Admin';

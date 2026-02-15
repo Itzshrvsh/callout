@@ -150,7 +150,7 @@ class OrganizationService {
       final currentUserId = _supabase.auth.currentUser?.id;
       if (currentUserId == null) throw Exception('User not authenticated');
 
-      // Update join request status
+      // Update join request status first
       await _supabase
           .from('join_requests')
           .update({
@@ -159,6 +159,20 @@ class OrganizationService {
             'processed_by': currentUserId,
           })
           .eq('id', requestId);
+
+      // Check if member already exists to avoid 23505 error
+      final existingMember = await _supabase
+          .from('organization_members')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      if (existingMember != null) {
+        // User is already a member, maybe update role?
+        // For now, just return as successful validation
+        return;
+      }
 
       // Create organization member entry
       await _supabase.from('organization_members').insert({
@@ -172,6 +186,10 @@ class OrganizationService {
         'department': department,
       });
     } catch (e) {
+      if (e.toString().contains('23505')) {
+        // Unique violation means already a member, which is fine
+        return;
+      }
       throw Exception('Failed to approve join request: ${e.toString()}');
     }
   }
@@ -250,6 +268,59 @@ class OrganizationService {
           .eq('id', memberId);
     } catch (e) {
       throw Exception('Failed to update member role: ${e.toString()}');
+    }
+  }
+
+  // Add member by email
+  Future<void> addMemberByEmail({
+    required String organizationId,
+    required String email,
+    required MemberRole role,
+    String? department,
+  }) async {
+    try {
+      // 1. Find user by email in public.users
+      final userResponse = await _supabase
+          .from('users')
+          .select('id')
+          .eq('email', email)
+          .maybeSingle();
+
+      if (userResponse == null) {
+        throw Exception(
+          'User with email $email not found. They must sign up first.',
+        );
+      }
+
+      final userId = userResponse['id'] as String;
+
+      // 2. Check if already a member
+      final existingMember = await _supabase
+          .from('organization_members')
+          .select('id')
+          .eq('organization_id', organizationId)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      if (existingMember != null) {
+        throw Exception('User is already a member of this organization.');
+      }
+
+      // 3. Add to organization
+      await _supabase.from('organization_members').insert({
+        'organization_id': organizationId,
+        'user_id': userId,
+        'role': role.name
+            .replaceAll(RegExp(r'([A-Z])'), '_\$1')
+            .toLowerCase()
+            .substring(1),
+        'status': 'active',
+        'department': department,
+      });
+    } catch (e) {
+      if (e.toString().contains('User with email')) rethrow;
+      if (e.toString().contains('already a member')) rethrow;
+      throw Exception('Failed to add member: ${e.toString()}');
     }
   }
 
